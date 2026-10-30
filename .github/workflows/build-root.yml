@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-root:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 90
 
     steps:
@@ -28,7 +28,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y apfs-fuse hfsprogs rsync android-sdk-libsparse-utils curl python3 unzip
+          sudo apt-get install -y hfsprogs android-sdk-libsparse-utils libfuse3-dev libbz2-dev zlib1g-dev cmake build-essential rsync curl python3 unzip
+          git clone --depth 1 --recursive https://github.com/sgan81/apfs-fuse.git
+          cd apfs-fuse && mkdir build && cd build
+          cmake ..
+          make -j$(nproc)
+          sudo cp apfs-fuse /usr/local/bin/
+          cd ../..
+          rm -rf apfs-fuse
+          which apfs-fuse
+          which img2simg
 
       - name: Download iOS 16.7.16 IPSW
         run: |
