@@ -1,0 +1,89 @@
+name: Build iOS 16 Rootfs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-root:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Maximize build disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apfs-fuse hfsprogs rsync android-sdk-libsparse-utils curl python3 unzip
+
+      - name: Download iOS 16.7.16 IPSW
+        run: |
+          echo "Downloading Apple IPSW..."
+          curl -fSL -o restore.ipsw "https://updates.cdn-apple.com/2025FallFCS/fullrestores/122-77006/1158E502-D76D-4226-AA06-ED5E30CD1111/iPhone10,3,iPhone10,6_16.7.16_20H392_Restore.ipsw"
+          ls -lh restore.ipsw
+
+      - name: Extract DMGs
+        run: |
+          echo "Extracting DMGs..."
+          unzip -q restore.ipsw "087-86698-044.dmg" "087-86593-047.dmg" "087-86715-047.dmg"
+          rm -f restore.ipsw
+          ls -lh *.dmg
+
+      - name: Create HFS+ Root Image
+        run: |
+          chmod +x tools/mkiosroot.sh tools/sweet-root-tweaks.py
+          echo "Running mkiosroot.sh..."
+          sudo bash tools/mkiosroot.sh 087-86698-044.dmg 087-86593-047.dmg 087-86715-047.dmg ios16-root.img 16G
+          rm -f *.dmg
+          ls -lh ios16-root.img
+
+      - name: Apply Sweet Tweaks
+        run: |
+          echo "Mounting and applying tweaks..."
+          sudo mkdir -p /mnt/iosroot
+          sudo mount -t hfsplus -o loop,force ios16-root.img /mnt/iosroot
+          sudo python3 tools/sweet-root-tweaks.py /mnt/iosroot
+          sudo umount /mnt/iosroot
+          sudo fsck.hfsplus -fy ios16-root.img || true
+
+      - name: Convert to Sparse Image
+        run: |
+          echo "Converting to sparse image..."
+          img2simg ios16-root.img ios16-root.simg
+          rm -f ios16-root.img
+          ls -lh ios16-root.simg
+          split -b 2000M -d ios16-root.simg ios16-root.simg.part
+          ls -lh ios16-root.simg.part*
+          sha256sum ios16-root.simg.part* > SHA256SUMS
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios16-root-sparse
+          path: |
+            ios16-root.simg.part*
+            SHA256SUMS
+          retention-days: 3
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v1.0-rootfs ios16-root.simg.part* SHA256SUMS \
+            --title "iOS 16.7.16 Root Filesystem (Sweet)" \
+            --notes "Sparse HFS+ rootfs image for Xiaomi Redmi Note 10 Pro (sweet). Concat parts: cat ios16-root.simg.part* > ios16-root.simg" \
+            || true
