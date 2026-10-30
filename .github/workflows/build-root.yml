@@ -25,10 +25,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install dependencies and kernel modules
         run: |
           sudo apt-get update
           sudo apt-get install -y hfsprogs android-sdk-libsparse-utils libfuse3-dev libbz2-dev zlib1g-dev cmake build-essential rsync curl python3 unzip
+          echo "Installing hfsplus kernel module..."
+          sudo modprobe hfsplus || sudo apt-get install -y "linux-modules-extra-$(uname -r)" || sudo apt-get install -y linux-modules-extra-azure || true
+          sudo modprobe hfsplus || true
+          sudo modprobe loop || true
+          lsmod | grep -iE 'hfs|loop' || true
+          echo "Building apfs-fuse..."
           git clone --depth 1 --recursive https://github.com/sgan81/apfs-fuse.git
           cd apfs-fuse && mkdir build && cd build
           cmake ..
@@ -55,6 +61,8 @@ jobs:
       - name: Create HFS+ Root Image
         run: |
           chmod +x tools/mkiosroot.sh tools/sweet-root-tweaks.py
+          echo "Ensuring hfsplus module is loaded..."
+          sudo modprobe hfsplus || true
           echo "Running mkiosroot.sh..."
           sudo bash tools/mkiosroot.sh 087-86698-044.dmg 087-86593-047.dmg 087-86715-047.dmg ios16-root.img 16G
           rm -f *.dmg
